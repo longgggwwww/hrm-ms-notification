@@ -1,0 +1,22 @@
+services:
+  notification:
+    build: .
+    container_name: notification-service
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=development
+      - KAFKA_BROKERS=kafka:29092
+      - EMAIL_USER=${EMAIL_USER:-}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD:-}
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npm run start:dev
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    name: hrm_shared_network
+    external: true
