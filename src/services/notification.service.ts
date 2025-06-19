@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmailService } from './email.service';
+import { ZaloService } from './zalo.service';
 
 export interface NotificationPayload {
   id: string;
@@ -39,7 +40,10 @@ export class NotificationService {
     last_processed: null as string | null,
   };
 
-  constructor(private readonly emailService: EmailService) {}
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly zaloService: ZaloService,
+  ) {}
 
   async processNotification(payload: NotificationPayload): Promise<void> {
     try {
@@ -158,17 +162,20 @@ export class NotificationService {
         `📧 Sending email notification for task created: ${payload.task_code}`,
       );
       await this.emailService.sendTaskCreatedEmail(
-        'huynhthanhthaoctu@gmail.com',
+        'yong9xi@gmail.com',
         payload.task_code,
         payload.task_name,
         payload.project_name,
       );
       this.logger.log(
-        `✅ Email notification sent successfully to huynhthanhthaoctu@gmail.com`,
+        `✅ Email notification sent successfully to yong9xi@gmail.com`,
       );
     } catch (error) {
       this.logger.error(`❌ Failed to send email notification:`, error);
     }
+
+    // Send Zalo group notification
+    await this.sendZaloTaskNotification(payload);
 
     if (payload.assignee_ids && payload.assignee_ids.length > 0) {
       this.logger.log(
@@ -235,6 +242,88 @@ export class NotificationService {
       `✅ Task Completed: ${payload.task_code} - ${payload.task_name}`,
     );
     this.logger.log(`🎉 Completed by: ${payload.creator_id}`);
+  }
+
+  /**
+   * Gửi thông báo task qua Zalo group
+   */
+  private async sendZaloTaskNotification(
+    payload: TaskEventPayload,
+  ): Promise<void> {
+    try {
+      this.logger.log(
+        `📱 Sending Zalo notification for task: ${payload.task_code}`,
+      );
+
+      // Tạo tin nhắn với format đẹp
+      let message = `🆕 **Task mới được tạo**\n\n`;
+      message += `📋 **Mã task:** ${payload.task_code}\n`;
+      message += `📝 **Tên task:** ${payload.task_name}\n`;
+
+      if (payload.project_name) {
+        message += `🏢 **Dự án:** ${payload.project_name}\n`;
+      }
+
+      message += `👤 **Người tạo:** User ${payload.creator_id}\n`;
+
+      if (payload.assignee_ids && payload.assignee_ids.length > 0) {
+        message += `👥 **Được giao cho:** ${payload.assignee_ids.map((id) => `User ${id}`).join(', ')}\n`;
+      }
+
+      message += `⏰ **Thời gian:** ${new Date(payload.timestamp).toLocaleString('vi-VN')}\n`;
+      message += `🔗 **Task ID:** #${payload.task_id}`;
+
+      // Sử dụng GMF API cho group text message
+      await this.zaloService.sendGroupTextMessage(message);
+
+      this.logger.log(
+        `✅ Zalo GMF notification sent successfully for task ${payload.task_code}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to send Zalo GMF notification for task ${payload.task_code}:`,
+        error,
+      );
+      // Không throw error để không làm gián đoạn flow chính
+    }
+  }
+
+  /**
+   * Gửi thông báo task rich format qua Zalo
+   */
+  private async sendZaloRichTaskNotification(
+    payload: TaskEventPayload,
+  ): Promise<void> {
+    try {
+      this.logger.log(
+        `📱 Sending rich Zalo notification for task: ${payload.task_code}`,
+      );
+
+      const title = `🆕 Task mới: ${payload.task_code}`;
+      const subtitle = `${payload.task_name}\n${payload.project_name ? `Dự án: ${payload.project_name}` : ''}`;
+
+      const elements = [
+        {
+          title: title,
+          subtitle: subtitle,
+          default_action: {
+            type: 'oa.open.url',
+            url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/tasks/${payload.task_id}`,
+          },
+        },
+      ];
+
+      await this.zaloService.sendRichGroupMessage(title, subtitle, elements);
+
+      this.logger.log(
+        `✅ Rich Zalo notification sent successfully for task ${payload.task_code}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to send rich Zalo notification for task ${payload.task_code}:`,
+        error,
+      );
+    }
   }
 
   getTaskEventStats() {

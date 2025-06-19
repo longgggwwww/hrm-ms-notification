@@ -9,6 +9,14 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - EMAIL_USER=${EMAIL_USER:-}
       - EMAIL_PASSWORD=${EMAIL_PASSWORD:-}
+      - EMAIL_FROM=${EMAIL_FROM:-HR Management System <noreply@hrm.com>}
+      - ZALO_APP_ID=${ZALO_APP_ID:-}
+      - ZALO_APP_SECRET=${ZALO_APP_SECRET:-}
+      - ZALO_CALLBACK_URL=${ZALO_CALLBACK_URL:-http://localhost:3000/auth/zalo/callback}
+      - ZALO_GROUP_ID=${ZALO_GROUP_ID:-}
+      - ZALO_API_URL=${ZALO_API_URL:-https://openapi.zalo.me}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
     volumes:
       - .:/app
       - /app/node_modules
@@ -19,4 +27,5 @@ services:
 networks:
   shared_network:
     name: hrm_shared_network
+
     external: true
