@@ -9,6 +9,73 @@ export class AuthController {
   constructor(private readonly zaloService: ZaloService) {}
 
   /**
+   * Endpoint để kiểm tra trạng thái cache và tokens
+   */
+  @Get('zalo/status')
+  async getZaloTokenStatus() {
+    try {
+      const status = await this.zaloService.getTokenStatus();
+      return {
+        success: true,
+        data: status,
+      };
+    } catch (error) {
+      this.logger.error('Error getting token status:', error);
+      return {
+        success: false,
+        message: 'Failed to get token status',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Endpoint để refresh token thủ công
+   */
+  @Post('zalo/refresh')
+  async refreshZaloToken() {
+    try {
+      const tokens = await this.zaloService.manualRefreshToken();
+      return {
+        success: true,
+        message: 'Tokens refreshed successfully',
+        data: {
+          expires_in: tokens.expires_in,
+          access_token: `${tokens.access_token.substring(0, 10)}...`,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error refreshing token:', error);
+      return {
+        success: false,
+        message: 'Failed to refresh token',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Endpoint để clear cache và tokens
+   */
+  @Post('zalo/clear')
+  async clearZaloTokens() {
+    try {
+      await this.zaloService.clearTokens();
+      return {
+        success: true,
+        message: 'Tokens cleared successfully',
+      };
+    } catch (error) {
+      this.logger.error('Error clearing tokens:', error);
+      return {
+        success: false,
+        message: 'Failed to clear tokens',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
    * Endpoint để redirect user đến Zalo để xác thực
    */
   @Get('zalo')
@@ -82,62 +149,6 @@ export class AuthController {
         error: error.message,
       });
     }
-  }
-
-  /**
-   * Endpoint để kiểm tra trạng thái authentication
-   */
-  @Get('zalo/status')
-  async getZaloAuthStatus(): Promise<any> {
-    try {
-      const status = this.zaloService.getTokenStatus();
-
-      return {
-        success: true,
-        data: status,
-      };
-    } catch (error) {
-      this.logger.error('Error getting Zalo auth status:', error);
-      return {
-        success: false,
-        message: 'Failed to get authentication status',
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Endpoint để refresh token thủ công (GET)
-   */
-  @Get('zalo/refresh-token')
-  async refreshZaloToken(): Promise<any> {
-    try {
-      const tokens = await this.zaloService.manualRefreshToken();
-
-      return {
-        success: true,
-        message: 'Token refreshed successfully',
-        data: {
-          expires_in: tokens.expires_in,
-          access_token: `${tokens.access_token.substring(0, 10)}...`,
-        },
-      };
-    } catch (error) {
-      this.logger.error('Error refreshing token:', error);
-      return {
-        success: false,
-        message: 'Failed to refresh token',
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Endpoint để refresh token thủ công (POST)
-   */
-  @Post('zalo/refresh-token')
-  async refreshZaloTokenPost(): Promise<any> {
-    return await this.refreshZaloToken();
   }
 
   /**

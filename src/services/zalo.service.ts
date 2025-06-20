@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { getConfig } from '../config/app.config';
+import { TokenCacheService } from './token-cache.service';
 
 interface ZaloTokens {
   access_token: string;
@@ -24,15 +25,79 @@ export class ZaloService implements OnModuleInit {
   private readonly httpClient: AxiosInstance;
   private tokens: ZaloTokens | null = null;
 
-  constructor() {
+  constructor(private readonly tokenCache: TokenCacheService) {
     this.httpClient = axios.create({
       baseURL: this.config.zalo.apiUrl,
       timeout: 10000,
     });
   }
 
-  onModuleInit() {
+  async onModuleInit() {
     this.logger.log('Zalo service initialized');
+    // Load tokens from cache if available
+    await this.loadTokensFromCache();
+  }
+
+  /**
+   * Load tokens from cache on startup
+   */
+  private async loadTokensFromCache(): Promise<void> {
+    try {
+      const cachedTokens = await this.tokenCache.getTokens();
+      if (cachedTokens) {
+        this.tokens = {
+          access_token: cachedTokens.access_token,
+          refresh_token: cachedTokens.refresh_token,
+          expires_in: cachedTokens.expires_in,
+        };
+        this.logger.log('Loaded tokens from cache successfully');
+      } else {
+        this.logger.log('No valid tokens found in cache');
+      }
+    } catch (error) {
+      this.logger.error('Error loading tokens from cache:', error);
+    }
+  }
+
+  /**
+   * Cache tokens with automatic expiry management
+   */
+  private async cacheTokens(tokens: ZaloTokens): Promise<void> {
+    try {
+      await this.tokenCache.setTokens(tokens);
+      this.logger.log('Tokens cached successfully');
+    } catch (error) {
+      this.logger.error('Error caching tokens:', error);
+    }
+  }
+
+  /**
+   * Get valid access token, refresh if needed
+   */
+  async getValidAccessToken(): Promise<string> {
+    // Check if we need to refresh token
+    const isExpiringSoon = await this.tokenCache.isTokenExpiringSoon();
+
+    if (isExpiringSoon) {
+      this.logger.log('Token is expiring soon, refreshing...');
+      try {
+        await this.refreshToken();
+      } catch (error) {
+        this.logger.error('Failed to refresh token:', error);
+        throw new Error('Unable to get valid access token');
+      }
+    }
+
+    // Ensure we have tokens loaded
+    if (!this.tokens) {
+      await this.loadTokensFromCache();
+    }
+
+    if (!this.tokens?.access_token) {
+      throw new Error('No access token available. Please authenticate first.');
+    }
+
+    return this.tokens.access_token;
   }
 
   /**
@@ -81,6 +146,9 @@ export class ZaloService implements OnModuleInit {
       this.tokens = response.data;
       this.logger.log('Successfully obtained Zalo tokens');
 
+      // Cache the tokens
+      await this.cacheTokens(this.tokens);
+
       return this.tokens;
     } catch (error) {
       this.logger.error('Error handling Zalo callback:', error);
@@ -120,6 +188,9 @@ export class ZaloService implements OnModuleInit {
 
       this.tokens = response.data.data;
       this.logger.log('Successfully refreshed Zalo tokens');
+
+      // Cache the refreshed tokens
+      await this.cacheTokens(this.tokens);
 
       return this.tokens;
     } catch (error) {
@@ -183,9 +254,7 @@ export class ZaloService implements OnModuleInit {
    * Gửi tin nhắn đến group với auto retry (Customer Support)
    */
   async sendGroupMessage(message: string): Promise<void> {
-    if (!this.tokens?.access_token) {
-      throw new Error('No access token available. Please authenticate first.');
-    }
+    const accessToken = await this.getValidAccessToken();
 
     const apiCall = async () => {
       const response = await this.httpClient.post(
@@ -200,7 +269,7 @@ export class ZaloService implements OnModuleInit {
         },
         {
           headers: {
-            Authorization: `Bearer ${this.tokens.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
         },
@@ -233,9 +302,7 @@ export class ZaloService implements OnModuleInit {
     console.log('groupId:', targetGroupId);
     console.log('api url:', this.httpClient.defaults.baseURL);
 
-    if (!this.tokens?.access_token) {
-      throw new Error('No access token available. Please authenticate first.');
-    }
+    const accessToken = await this.getValidAccessToken();
 
     if (!targetGroupId) {
       throw new Error(
@@ -256,7 +323,7 @@ export class ZaloService implements OnModuleInit {
         },
         {
           headers: {
-            access_token: this.tokens.access_token,
+            access_token: accessToken,
             'Content-Type': 'application/json',
           },
         },
@@ -291,9 +358,7 @@ export class ZaloService implements OnModuleInit {
     // Sử dụng groupId được truyền vào hoặc fallback về config default
     const targetGroupId = groupId || this.config.zalo.groupId;
 
-    if (!this.tokens?.access_token) {
-      throw new Error('No access token available. Please authenticate first.');
-    }
+    const accessToken = await this.getValidAccessToken();
 
     if (!targetGroupId) {
       throw new Error(
@@ -331,7 +396,7 @@ export class ZaloService implements OnModuleInit {
         },
         {
           headers: {
-            Authorization: `Bearer ${this.tokens.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
         },
@@ -356,15 +421,13 @@ export class ZaloService implements OnModuleInit {
    * Lấy thông tin Official Account profile
    */
   async getUserInfo(): Promise<ZaloUserInfo> {
-    if (!this.tokens?.access_token) {
-      throw new Error('No access token available. Please authenticate first.');
-    }
+    const accessToken = await this.getValidAccessToken();
 
     const apiCall = async () => {
       try {
         const response = await this.httpClient.get('/v2.0/oa/getoa', {
           headers: {
-            Authorization: `Bearer ${this.tokens.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
         });
 
@@ -415,19 +478,38 @@ export class ZaloService implements OnModuleInit {
   }
 
   /**
-   * Lấy trạng thái hiện tại của tokens
+   * Lấy trạng thái hiện tại của tokens từ cache
    */
-  getTokenStatus(): {
+  async getTokenStatus(): Promise<{
     hasTokens: boolean;
     accessToken?: string;
     expiresIn?: number;
-  } {
+    timeToLive?: number;
+    isExpiringSoon?: boolean;
+    createdAt?: Date;
+    cacheStatus?: any;
+  }> {
+    const cacheStatus = await this.tokenCache.getCacheStatus();
+
     return {
-      hasTokens: !!this.tokens,
+      hasTokens: cacheStatus.hasTokens,
       accessToken: this.tokens?.access_token
         ? `${this.tokens.access_token.substring(0, 10)}...`
         : undefined,
       expiresIn: this.tokens?.expires_in,
+      timeToLive: cacheStatus.timeToLive,
+      isExpiringSoon: cacheStatus.isExpiringSoon,
+      createdAt: cacheStatus.createdAt,
+      cacheStatus,
     };
+  }
+
+  /**
+   * Clear tokens from both memory and cache
+   */
+  async clearTokens(): Promise<void> {
+    this.tokens = null;
+    await this.tokenCache.clearTokens();
+    this.logger.log('Tokens cleared from memory and cache');
   }
 }
