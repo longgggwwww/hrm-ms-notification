@@ -225,12 +225,22 @@ export class ZaloService implements OnModuleInit {
    * Gửi tin nhắn text đến group sử dụng GMF (Group Message Feature)
    * Theo document: https://developers.zalo.me/docs/official-account/nhom-chat-gmf/tin-nhan/text_message
    */
-  async sendGroupTextMessage(message: string): Promise<void> {
+  async sendGroupTextMessage(message: string, groupId?: string): Promise<void> {
+    // Sử dụng groupId được truyền vào hoặc fallback về config default
+    const targetGroupId = groupId || this.config.zalo.groupId;
+
     console.log('Sending group text message:', message);
-    console.log('groupId:', this.config.zalo.groupId);
+    console.log('groupId:', targetGroupId);
     console.log('api url:', this.httpClient.defaults.baseURL);
+
     if (!this.tokens?.access_token) {
       throw new Error('No access token available. Please authenticate first.');
+    }
+
+    if (!targetGroupId) {
+      throw new Error(
+        'No group ID provided and no default group ID configured.',
+      );
     }
 
     const apiCall = async () => {
@@ -238,7 +248,7 @@ export class ZaloService implements OnModuleInit {
         'https://openapi.zalo.me/v3.0/oa/group/message',
         {
           recipient: {
-            group_id: this.config.zalo.groupId,
+            group_id: targetGroupId,
           },
           message: {
             text: message,
@@ -260,7 +270,9 @@ export class ZaloService implements OnModuleInit {
         throw error;
       }
 
-      this.logger.log('Successfully sent text message to Zalo group via GMF');
+      this.logger.log(
+        `Successfully sent text message to Zalo group ${targetGroupId} via GMF`,
+      );
       return response.data;
     };
 
@@ -274,9 +286,19 @@ export class ZaloService implements OnModuleInit {
     title: string,
     subtitle: string,
     elements?: any[],
+    groupId?: string,
   ): Promise<void> {
+    // Sử dụng groupId được truyền vào hoặc fallback về config default
+    const targetGroupId = groupId || this.config.zalo.groupId;
+
     if (!this.tokens?.access_token) {
       throw new Error('No access token available. Please authenticate first.');
+    }
+
+    if (!targetGroupId) {
+      throw new Error(
+        'No group ID provided and no default group ID configured.',
+      );
     }
 
     const apiCall = async () => {
@@ -301,7 +323,7 @@ export class ZaloService implements OnModuleInit {
         '/v3.0/oa/message/cs',
         {
           recipient: {
-            user_id: this.config.zalo.groupId,
+            user_id: targetGroupId,
           },
           message: {
             attachment: attachment,

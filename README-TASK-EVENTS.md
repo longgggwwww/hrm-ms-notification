@@ -12,20 +12,30 @@ The Go service publishes events with the following structure:
 
 ```json
 {
-  "event_type": "task_created",
+  "event_id": "20250620150405-abcd1234",
+  "event_type": "task.created",
+  "timestamp": "2025-06-20T10:30:00Z",
+  "source": "hrm-ms-hr",
   "task_id": 123,
-  "task_code": "#123",
+  "task_code": "TASK-123",
   "task_name": "Implement user authentication system",
+  "description": "Detailed description of the task",
   "project_id": 456,
   "project_name": "HR Management Platform",
-  "assignee_ids": [101, 102],
+  "department_id": 5,
   "creator_id": 100,
+  "updater_id": 100,
+  "status": "pending",
+  "type": "feature",
+  "process": 0,
+  "start_at": "2025-06-20T08:00:00Z",
+  "due_date": "2025-06-27T17:00:00Z",
+  "created_at": "2025-06-20T10:30:00Z",
+  "updated_at": "2025-06-20T10:30:00Z",
+  "assignee_ids": [101, 102],
+  "label_ids": [301, 302],
   "org_id": 1,
-  "timestamp": "2025-06-12T10:30:00Z",
-  "metadata": {
-    "priority": "high",
-    "type": "feature"
-  }
+  "zalo_gid": "3456789012345678901"
 }
 ```
 
@@ -146,3 +156,42 @@ export const kafkaConfig: KafkaOptions = {
 - `user.notifications` - User notification events
 - `email.notifications` - Email notification events
 - `sms.notifications` - SMS notification events
+
+## Field Descriptions
+
+| Field           | Type     | Description                                           |
+| --------------- | -------- | ----------------------------------------------------- |
+| `event_id`      | string   | Unique identifier for the event                       |
+| `event_type`    | string   | Type of event: `task.created`, `task.updated`         |
+| `timestamp`     | string   | ISO timestamp when event occurred                     |
+| `source`        | string   | Source service identifier (`hrm-ms-hr`)               |
+| `task_id`       | number   | Unique task identifier                                |
+| `task_code`     | string   | Human-readable task code                              |
+| `task_name`     | string   | Task title/name                                       |
+| `description`   | string   | Task description (optional)                           |
+| `project_id`    | number   | Associated project ID (optional)                      |
+| `department_id` | number   | Associated department ID (optional)                   |
+| `creator_id`    | number   | User ID who created the task                          |
+| `updater_id`    | number   | User ID who last updated the task                     |
+| `status`        | string   | Current task status                                   |
+| `type`          | string   | Task type (feature, bug, etc.)                        |
+| `process`       | number   | Task completion percentage (0-100)                    |
+| `start_at`      | string   | Task start date (optional)                            |
+| `due_date`      | string   | Task due date (optional)                              |
+| `created_at`    | string   | Task creation timestamp                               |
+| `updated_at`    | string   | Task last update timestamp                            |
+| `assignee_ids`  | number[] | Array of assigned user IDs                            |
+| `label_ids`     | number[] | Array of label IDs (optional)                         |
+| `org_id`        | number   | Organization ID                                       |
+| `zalo_gid`      | string   | Zalo Group ID for department notifications (optional) |
+
+## Zalo Integration
+
+When a task event contains a `zalo_gid` field, the notification service will:
+
+1. Check if the Zalo Group ID is provided
+2. Send formatted notifications to the specified Zalo group
+3. Include task details, assignees, and deadlines in the message
+4. Log the Zalo Group ID for debugging purposes
+
+If `zalo_gid` is not provided, Zalo notifications will be skipped and a warning will be logged.

@@ -1,4 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  TaskEventDto,
+  TaskEventType,
+  isValidTaskEventType,
+} from '../dto/task-event.dto';
 import { EmailService } from './email.service';
 import { ZaloService } from './zalo.service';
 
@@ -12,7 +17,10 @@ export interface NotificationPayload {
   timestamp: string;
 }
 
-export interface TaskEventPayload {
+export interface TaskEventPayload extends TaskEventDto {}
+
+// Keep the legacy interface for backward compatibility
+export interface LegacyTaskEventPayload {
   event_type: string;
   task_id: number;
   task_code: string;
@@ -32,10 +40,10 @@ export class NotificationService {
   private taskEventStats = {
     total: 0,
     by_type: {
-      task_created: 0,
-      task_updated: 0,
-      task_assigned: 0,
-      task_completed: 0,
+      [TaskEventType.TASK_CREATED]: 0,
+      [TaskEventType.TASK_UPDATED]: 0,
+      [TaskEventType.TASK_ASSIGNED]: 0,
+      [TaskEventType.TASK_COMPLETED]: 0,
     },
     last_processed: null as string | null,
   };
@@ -108,31 +116,35 @@ export class NotificationService {
 
   async processTaskEvent(payload: TaskEventPayload): Promise<void> {
     try {
+      // Validate event type
+      if (!isValidTaskEventType(payload.event_type)) {
+        this.logger.warn(`Unknown task event type: ${payload.event_type}`);
+        return;
+      }
+
       // Update statistics
       this.taskEventStats.total++;
-      this.taskEventStats.by_type[
-        payload.event_type as keyof typeof this.taskEventStats.by_type
-      ]++;
+      this.taskEventStats.by_type[payload.event_type as TaskEventType]++;
       this.taskEventStats.last_processed = new Date().toISOString();
 
       this.logger.log(
         `🔥 Processing task event: ${payload.event_type} for task ${payload.task_code}`,
       );
       this.logger.log(
-        `📊 Stats - Total: ${this.taskEventStats.total}, ${payload.event_type}: ${this.taskEventStats.by_type[payload.event_type as keyof typeof this.taskEventStats.by_type]}`,
+        `📊 Stats - Total: ${this.taskEventStats.total}, ${payload.event_type}: ${this.taskEventStats.by_type[payload.event_type as TaskEventType]}`,
       );
 
       switch (payload.event_type) {
-        case 'task.created':
+        case TaskEventType.TASK_CREATED:
           await this.handleTaskCreated(payload);
           break;
-        case 'task.updated':
+        case TaskEventType.TASK_UPDATED:
           await this.handleTaskUpdated(payload);
           break;
-        case 'task.assigned':
+        case TaskEventType.TASK_ASSIGNED:
           await this.handleTaskAssigned(payload);
           break;
-        case 'task.completed':
+        case TaskEventType.TASK_COMPLETED:
           await this.handleTaskCompleted(payload);
           break;
         default:
@@ -154,6 +166,37 @@ export class NotificationService {
 
     if (payload.project_name) {
       this.logger.log(`🏢 Project: ${payload.project_name}`);
+    }
+
+    this.logger.log(
+      `📊 Status: ${payload.status}, Type: ${payload.type}, Progress: ${payload.process}%`,
+    );
+
+    if (payload.description) {
+      this.logger.log(`📄 Description: ${payload.description}`);
+    }
+
+    if (payload.start_at) {
+      this.logger.log(
+        `🟢 Start Date: ${new Date(payload.start_at).toLocaleString('vi-VN')}`,
+      );
+    }
+
+    if (payload.due_date) {
+      this.logger.log(
+        `🔴 Due Date: ${new Date(payload.due_date).toLocaleString('vi-VN')}`,
+      );
+    }
+
+    if (payload.label_ids && payload.label_ids.length > 0) {
+      this.logger.log(`🏷️ Labels: ${payload.label_ids.join(', ')}`);
+    }
+    if (payload.department_id) {
+      this.logger.log(`🏢 Department ID: ${payload.department_id}`);
+    }
+
+    if (payload.zalo_gid) {
+      this.logger.log(`💬 Zalo Group ID: ${payload.zalo_gid}`);
     }
 
     // Send email notification to specified email address
@@ -194,7 +237,15 @@ export class NotificationService {
             task_id: payload.task_id,
             task_code: payload.task_code,
             project_id: payload.project_id,
+            department_id: payload.department_id,
             event_type: payload.event_type,
+            status: payload.status,
+            type: payload.type,
+            process: payload.process,
+            start_at: payload.start_at,
+            due_date: payload.due_date,
+            creator_id: payload.creator_id,
+            updater_id: payload.updater_id,
           },
           timestamp: payload.timestamp,
         };
@@ -208,13 +259,76 @@ export class NotificationService {
     this.logger.log(
       `✏️ Task Updated: ${payload.task_code} - ${payload.task_name}`,
     );
-    this.logger.log(`🔄 Last modified by creator: ${payload.creator_id}`);
+    this.logger.log(`🔄 Last modified by updater: ${payload.updater_id}`);
+    this.logger.log(
+      `📊 Status: ${payload.status}, Type: ${payload.type}, Progress: ${payload.process}%`,
+    );
+
+    if (payload.description) {
+      this.logger.log(`📄 Description: ${payload.description}`);
+    }
+
+    if (payload.start_at) {
+      this.logger.log(
+        `🟢 Start Date: ${new Date(payload.start_at).toLocaleString('vi-VN')}`,
+      );
+    }
+
+    if (payload.due_date) {
+      this.logger.log(
+        `🔴 Due Date: ${new Date(payload.due_date).toLocaleString('vi-VN')}`,
+      );
+    }
+
+    this.logger.log(
+      `📅 Updated At: ${new Date(payload.updated_at).toLocaleString('vi-VN')}`,
+    );
+
+    // Send Zalo group notification for task updates
+    await this.sendZaloTaskNotification(payload);
+
+    // Notify assignees about the update
+    if (payload.assignee_ids && payload.assignee_ids.length > 0) {
+      for (const assigneeId of payload.assignee_ids) {
+        const notification: NotificationPayload = {
+          id: `task_updated_${payload.task_id}_${assigneeId}`,
+          userId: assigneeId.toString(),
+          type: 'push',
+          title: 'Task Updated',
+          message: `Task "${payload.task_name}" has been updated`,
+          metadata: {
+            task_id: payload.task_id,
+            task_code: payload.task_code,
+            project_id: payload.project_id,
+            department_id: payload.department_id,
+            event_type: payload.event_type,
+            status: payload.status,
+            type: payload.type,
+            process: payload.process,
+            updater_id: payload.updater_id,
+          },
+          timestamp: payload.timestamp,
+        };
+
+        await this.processNotification(notification);
+      }
+    }
   }
 
   private async handleTaskAssigned(payload: TaskEventPayload): Promise<void> {
     this.logger.log(
       `👤 Task Assigned: ${payload.task_code} to employees ${payload.assignee_ids.join(', ')}`,
     );
+
+    this.logger.log(
+      `📊 Status: ${payload.status}, Type: ${payload.type}, Progress: ${payload.process}%`,
+    );
+
+    if (payload.due_date) {
+      this.logger.log(
+        `🔴 Due Date: ${new Date(payload.due_date).toLocaleString('vi-VN')}`,
+      );
+    }
 
     // Send notification to newly assigned users
     for (const assigneeId of payload.assignee_ids) {
@@ -228,20 +342,79 @@ export class NotificationService {
           task_id: payload.task_id,
           task_code: payload.task_code,
           project_id: payload.project_id,
+          department_id: payload.department_id,
           event_type: payload.event_type,
+          status: payload.status,
+          type: payload.type,
+          process: payload.process,
+          start_at: payload.start_at,
+          due_date: payload.due_date,
+          description: payload.description,
+          creator_id: payload.creator_id,
+          updater_id: payload.updater_id,
         },
         timestamp: payload.timestamp,
       };
 
       await this.processNotification(notification);
     }
+
+    // Send Zalo notification for task assignment
+    await this.sendZaloTaskNotification(payload);
   }
 
   private async handleTaskCompleted(payload: TaskEventPayload): Promise<void> {
     this.logger.log(
       `✅ Task Completed: ${payload.task_code} - ${payload.task_name}`,
     );
-    this.logger.log(`🎉 Completed by: ${payload.creator_id}`);
+    this.logger.log(`🎉 Completed by: ${payload.updater_id}`);
+    this.logger.log(`📊 Final Progress: ${payload.process}%`);
+    this.logger.log(
+      `📅 Completed At: ${new Date(payload.updated_at).toLocaleString('vi-VN')}`,
+    );
+
+    if (payload.due_date) {
+      const dueDate = new Date(payload.due_date);
+      const completedDate = new Date(payload.updated_at);
+      const isOnTime = completedDate <= dueDate;
+      this.logger.log(
+        `⏰ ${isOnTime ? 'Completed on time' : 'Completed late'} (Due: ${dueDate.toLocaleString('vi-VN')})`,
+      );
+    }
+
+    // Send completion notification to assignees and creator
+    const notifyUserIds = [...payload.assignee_ids];
+    if (!notifyUserIds.includes(payload.creator_id)) {
+      notifyUserIds.push(payload.creator_id);
+    }
+
+    for (const userId of notifyUserIds) {
+      const notification: NotificationPayload = {
+        id: `task_completed_${payload.task_id}_${userId}`,
+        userId: userId.toString(),
+        type: 'push',
+        title: 'Task Completed',
+        message: `Task "${payload.task_name}" has been completed`,
+        metadata: {
+          task_id: payload.task_id,
+          task_code: payload.task_code,
+          project_id: payload.project_id,
+          department_id: payload.department_id,
+          event_type: payload.event_type,
+          status: payload.status,
+          type: payload.type,
+          process: payload.process,
+          completed_by: payload.updater_id,
+          completed_at: payload.updated_at,
+        },
+        timestamp: payload.timestamp,
+      };
+
+      await this.processNotification(notification);
+    }
+
+    // Send Zalo notification for task completion
+    await this.sendZaloTaskNotification(payload);
   }
 
   /**
@@ -255,26 +428,70 @@ export class NotificationService {
         `📱 Sending Zalo notification for task: ${payload.task_code}`,
       );
 
-      // Tạo tin nhắn với format đẹp
-      let message = `🆕 **Task mới được tạo**\n\n`;
+      // Kiểm tra xem có zalo_gid không trước khi gửi
+      if (!payload.zalo_gid) {
+        this.logger.log(
+          `⚠️ No Zalo Group ID found for task ${payload.task_code} - skipping Zalo notification`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `💬 Using Zalo Group ID: ${payload.zalo_gid} for task ${payload.task_code}`,
+      );
+
+      // Tạo tin nhắn với format đẹp dựa trên event type
+      let message = '';
+      if (payload.event_type === TaskEventType.TASK_CREATED) {
+        message = `🆕 **Task mới được tạo**\n\n`;
+      } else if (payload.event_type === TaskEventType.TASK_UPDATED) {
+        message = `✏️ **Task được cập nhật**\n\n`;
+      } else {
+        message = `📋 **Task Event: ${payload.event_type}**\n\n`;
+      }
+
       message += `📋 **Mã task:** ${payload.task_code}\n`;
       message += `📝 **Tên task:** ${payload.task_name}\n`;
+
+      if (payload.description) {
+        message += `📄 **Mô tả:** ${payload.description}\n`;
+      }
 
       if (payload.project_name) {
         message += `🏢 **Dự án:** ${payload.project_name}\n`;
       }
 
-      message += `👤 **Người tạo:** User ${payload.creator_id}\n`;
+      message += `� **Trạng thái:** ${payload.status}\n`;
+      message += `🏷️ **Loại:** ${payload.type}\n`;
+      message += `📈 **Tiến độ:** ${payload.process}%\n`;
+
+      if (payload.start_at) {
+        message += `🟢 **Ngày bắt đầu:** ${new Date(payload.start_at).toLocaleDateString('vi-VN')}\n`;
+      }
+
+      if (payload.due_date) {
+        message += `🔴 **Ngày hết hạn:** ${new Date(payload.due_date).toLocaleDateString('vi-VN')}\n`;
+      }
+
+      message += `�👤 **Người tạo:** User ${payload.creator_id}\n`;
+
+      if (payload.event_type === 'task.updated') {
+        message += `✏️ **Người cập nhật:** User ${payload.updater_id}\n`;
+      }
 
       if (payload.assignee_ids && payload.assignee_ids.length > 0) {
         message += `👥 **Được giao cho:** ${payload.assignee_ids.map((id) => `User ${id}`).join(', ')}\n`;
       }
 
+      if (payload.label_ids && payload.label_ids.length > 0) {
+        message += `🏷️ **Labels:** ${payload.label_ids.join(', ')}\n`;
+      }
+
       message += `⏰ **Thời gian:** ${new Date(payload.timestamp).toLocaleString('vi-VN')}\n`;
       message += `🔗 **Task ID:** #${payload.task_id}`;
 
-      // Sử dụng GMF API cho group text message
-      await this.zaloService.sendGroupTextMessage(message);
+      // Sử dụng GMF API cho group text message với zalo_gid từ payload
+      await this.zaloService.sendGroupTextMessage(message, payload.zalo_gid);
 
       this.logger.log(
         `✅ Zalo GMF notification sent successfully for task ${payload.task_code}`,
@@ -299,8 +516,24 @@ export class NotificationService {
         `📱 Sending rich Zalo notification for task: ${payload.task_code}`,
       );
 
-      const title = `🆕 Task mới: ${payload.task_code}`;
-      const subtitle = `${payload.task_name}\n${payload.project_name ? `Dự án: ${payload.project_name}` : ''}`;
+      const eventTypeText =
+        payload.event_type === 'task.created'
+          ? 'Task mới'
+          : payload.event_type === 'task.updated'
+            ? 'Task cập nhật'
+            : 'Task event';
+
+      const title = `${payload.event_type === 'task.created' ? '🆕' : '✏️'} ${eventTypeText}: ${payload.task_code}`;
+
+      let subtitle = `${payload.task_name}\n`;
+      if (payload.project_name) {
+        subtitle += `🏢 Dự án: ${payload.project_name}\n`;
+      }
+      subtitle += `📊 ${payload.status} | ${payload.type} | ${payload.process}%`;
+
+      if (payload.due_date) {
+        subtitle += `\n🔴 Hạn: ${new Date(payload.due_date).toLocaleDateString('vi-VN')}`;
+      }
 
       const elements = [
         {
@@ -313,7 +546,12 @@ export class NotificationService {
         },
       ];
 
-      await this.zaloService.sendRichGroupMessage(title, subtitle, elements);
+      await this.zaloService.sendRichGroupMessage(
+        title,
+        subtitle,
+        elements,
+        payload.zalo_gid,
+      );
 
       this.logger.log(
         `✅ Rich Zalo notification sent successfully for task ${payload.task_code}`,

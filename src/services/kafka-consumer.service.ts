@@ -136,10 +136,34 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`📋 Event Type: ${message.event_type}`);
       this.logger.log(`🏷️ Task Code: ${message.task_code}`);
       this.logger.log(`📝 Task Name: ${message.task_name}`);
+      this.logger.log(
+        `📊 Status: ${message.status}, Type: ${message.type}, Progress: ${message.process}%`,
+      );
       if (message.project_name) {
         this.logger.log(`🏢 Project: ${message.project_name}`);
       }
-      this.logger.log(`⏰ Timestamp: ${message.timestamp}`);
+      if (message.department_id) {
+        this.logger.log(`🏢 Department ID: ${message.department_id}`);
+      }
+      if (message.assignee_ids && message.assignee_ids.length > 0) {
+        this.logger.log(`👥 Assignees: ${message.assignee_ids.join(', ')}`);
+      }
+      if (message.label_ids && message.label_ids.length > 0) {
+        this.logger.log(`🏷️ Labels: ${message.label_ids.join(', ')}`);
+      }
+      if (message.due_date) {
+        this.logger.log(
+          `🔴 Due Date: ${new Date(message.due_date).toLocaleString('vi-VN')}`,
+        );
+      }
+      if (message.zalo_gid) {
+        this.logger.log(`💬 Zalo Group ID: ${message.zalo_gid}`);
+      }
+      this.logger.log(
+        `⏰ Event Timestamp: ${new Date(message.timestamp).toLocaleString('vi-VN')}`,
+      );
+      this.logger.log(`🔗 Event ID: ${message.event_id}`);
+      this.logger.log(`📈 Organization ID: ${message.org_id}`);
       this.logger.log(`📊 Total Messages Processed: ${this.messageCount}`);
       this.logger.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     } catch (error) {
